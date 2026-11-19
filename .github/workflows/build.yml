@@ -44,14 +44,14 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with: { path: dist }
-      - name: Set up Android SDK
-        if: env.SITE_URL != ''
-        uses: android-actions/setup-android@v3
       - name: Package APK with Meta Quest Bubblewrap
         if: env.SITE_URL != ''
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "Android SDK: $ANDROID_HOME"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-34" "build-tools;34.0.0" > /dev/null
           npm install --global @meta-quest/bubblewrap-cli
           mkdir -p ~/.bubblewrap
           echo "{\"jdkPath\":\"$JAVA_HOME\",\"androidSdkPath\":\"$ANDROID_HOME\"}" > ~/.bubblewrap/config.json
