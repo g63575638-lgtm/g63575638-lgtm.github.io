@@ -46,11 +46,15 @@ jobs:
         with: { path: dist }
       - name: Package APK with Meta Quest Bubblewrap
         if: env.SITE_URL != ''
+        continue-on-error: true
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           echo "Android SDK: $ANDROID_HOME"
-          yes | "$SDKM" --licenses > /dev/null || true
+          # Bubblewrap validates the legacy SDK layout (<sdk>/tools/bin/sdkmanager)
+          [ -e "$ANDROID_HOME/tools" ] || sudo ln -s "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/tools"
+          ls "$ANDROID_HOME"
+          yes 2>/dev/null | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platforms;android-34" "build-tools;34.0.0" > /dev/null
           npm install --global @meta-quest/bubblewrap-cli
           mkdir -p ~/.bubblewrap
