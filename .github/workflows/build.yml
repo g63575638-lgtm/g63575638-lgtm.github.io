@@ -1,0 +1,78 @@
+# FUTON GOLF VR — CI: build + test the game, deploy it to GitHub Pages, package the Meta Quest APK.
+#
+# One-time setup (repository Settings):
+#   * Pages: Source = "GitHub Actions".
+#   * Variables -> SITE_URL = public HTTPS address of the game, e.g. https://golf.example.com/
+#     (must be the domain ROOT: a custom domain on Pages or a <user>.github.io repo — see README §APK)
+#   * Optional secrets for a stable signing key (strongly recommended):
+#       ANDROID_KEYSTORE_BASE64 (base64 of a .keystore with alias "futon"), KEYSTORE_PASSWORD, KEY_PASSWORD
+name: Build FUTON GOLF VR
+on:
+  push: { branches: [main, master] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SITE_URL: ${{ vars.SITE_URL }}
+      BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'futongolf' }}
+      BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD || 'futongolf' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - name: Build web game
+        run: node tools/build.js && node --check dist/game.js
+      - name: Unit tests (course generation + physics)
+        run: node tests/gen_test.js && node tests/phys_test.js
+      - name: Signing key
+        run: |
+          mkdir -p android
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/android.keystore
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret — generating a throw-away key (fine for sideloading)."
+            keytool -genkeypair -keystore android/android.keystore -alias futon -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" -keypass "$BUBBLEWRAP_KEY_PASSWORD" -dname "CN=FUTON GROUP, O=FUTON GROUP, C=US"
+          fi
+          FP=$(keytool -list -v -keystore android/android.keystore -alias futon -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" | grep -m1 "SHA256:" | awk '{print $2}')
+          node tools/make-assetlinks.js "$FP"
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+      - name: Set up Android SDK
+        if: env.SITE_URL != ''
+        uses: android-actions/setup-android@v3
+      - name: Package APK with Meta Quest Bubblewrap
+        if: env.SITE_URL != ''
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          npm install --global @meta-quest/bubblewrap-cli
+          mkdir -p ~/.bubblewrap
+          echo "{\"jdkPath\":\"$JAVA_HOME\",\"androidSdkPath\":\"$ANDROID_HOME\"}" > ~/.bubblewrap/config.json
+          node tools/make-twa-manifest.js "$SITE_URL" "${{ github.run_number }}"
+          cd android
+          bubblewrap update --skipVersionUpgrade
+          bubblewrap build --skipPwaValidation
+          cp app-release-signed.apk ../FUTON_GOLF_VR.apk
+      - name: Source archive
+        run: git archive --format=zip -o FUTON_GOLF_VR_SOURCE.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FUTON_GOLF_VR
+          path: |
+            FUTON_GOLF_VR.apk
+            FUTON_GOLF_VR_SOURCE.zip
+          if-no-files-found: warn
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: '${{ steps.deployment.outputs.page_url }}' }
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
