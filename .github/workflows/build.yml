@@ -29,6 +29,15 @@ jobs:
         run: node tools/build.js && node --check dist/game.js
       - name: Unit tests (course generation + physics)
         run: node tests/gen_test.js && node tests/phys_test.js
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.7' }
+      - name: Offline APK (whole game inside, no internet needed)
+        continue-on-error: true
+        run: |
+          node tools/make-offline-android.js
+          cd android-offline
+          gradle --no-daemon assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../FUTON_GOLF_VR_OFFLINE.apk
       - name: Signing key
         run: |
           mkdir -p android
@@ -62,7 +71,9 @@ jobs:
           bubblewrap build --skipPwaValidation
           cp app-release-signed.apk ../FUTON_GOLF_VR.apk
       - name: Put the APK on the website (direct download link)
-        run: if [ -f FUTON_GOLF_VR.apk ]; then cp FUTON_GOLF_VR.apk dist/FUTON_GOLF_VR.apk; fi
+        run: |
+          if [ -f FUTON_GOLF_VR.apk ]; then cp FUTON_GOLF_VR.apk dist/FUTON_GOLF_VR.apk; fi
+          if [ -f FUTON_GOLF_VR_OFFLINE.apk ]; then cp FUTON_GOLF_VR_OFFLINE.apk dist/FUTON_GOLF_VR_OFFLINE.apk; fi
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with: { path: dist }
@@ -72,6 +83,7 @@ jobs:
         with:
           name: FUTON_GOLF_VR
           path: |
+            FUTON_GOLF_VR_OFFLINE.apk
             FUTON_GOLF_VR.apk
             FUTON_GOLF_VR_SOURCE.zip
           if-no-files-found: warn
